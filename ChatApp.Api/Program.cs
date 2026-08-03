@@ -1,4 +1,5 @@
 using ChatApp.Api.Data;
+using ChatApp.Api.Hubs;
 using ChatApp.Api.Startup;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -14,6 +15,8 @@ builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 
 builder.Services.AddCors();
+
+builder.Services.AddSignalR();
 
 builder.Services.AddDbContext<ChatAppDbContext>(options =>
 {
@@ -69,11 +72,19 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<ChatAppDbContext>();
+    await context.UserConnections.ExecuteDeleteAsync();
+}
+
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
 
 app.UseAuthorization();
+
+app.MapHub<ChatHub>("/hubs");
 
 app.MapControllers();
 
