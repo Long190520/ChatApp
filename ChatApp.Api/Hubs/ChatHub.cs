@@ -51,13 +51,28 @@ namespace ChatApp.Api.Hubs
                     await _context.UserConnections.AddAsync(userConnections);
                     await _context.SaveChangesAsync();
 
+                    // Đổi status sang Online khi user kết nối thành công
                     await _context.Users
                         .Where(u => u.Id == userId)
                         .ExecuteUpdateAsync(u =>
                         u.SetProperty(x => x.Status, "Online"));
 
                     // Thêm ConnectionId vào Group riêng của user
-                    await Groups.AddToGroupAsync(connectionId, $"User_{userId}");
+                    await Groups.AddToGroupAsync(connectionId, $"user_{userId}");
+
+                    bool isFirstConnection = !await _context.UserConnections
+                        .AnyAsync(x => x.UserId == userId && x.ConnectionId != connectionId);
+
+                    if (isFirstConnection)
+                    {
+                        // Gửi thông báo cho các bạn bè hoặc thành viên phòng chat rằng user đã online
+                        var allContacts = await GetRelatedUserId(userId);
+
+                        foreach (var contact in allContacts)
+                        {
+                            await Clients.Group($"user_{contact}").SendAsync("OnUserOnline", userId);
+                        }
+                    }
 
                     // Chỉ gọi base khi mọi logic nghiệp vụ của bạn đã chạy thành công
                     await base.OnConnectedAsync();
@@ -131,16 +146,22 @@ namespace ChatApp.Api.Hubs
 
                     // Các bước xử lí logic người dùng disconnect hoàn toàn, ví dụ: cập nhật trạng thái offline, gửi thông báo cho bạn bè, v.v.
                     // 1/ Cập nhật trạng thái người dùng trong bảng Users
-                    
+
                     await _context.Users
                         .Where(u => u.Id == userId)
-                        .ExecuteUpdateAsync(u => 
+                        .ExecuteUpdateAsync(u =>
                         u.SetProperty(x => x.LastSeenAt, DateTime.UtcNow)
                         .SetProperty(x => x.Status, "Offline"));
 
                     // 2/ gửi thông báo cho các bạn bè của người dùng này rằng họ đã offline (nếu cần)
 
+                    var allContacts = await GetRelatedUserId(userId);
 
+                    foreach (var contact in allContacts)
+                    {
+                        // Gửi thông báo cho từng bạn bè hoặc thành viên phòng chat rằng user đã offline
+                        await Clients.Group($"user_{contact}").SendAsync("OnUserOffline", userId);
+                    }
                 }
             }
             catch (Exception ex)
@@ -154,5 +175,23 @@ namespace ChatApp.Api.Hubs
                 await base.OnDisconnectedAsync(exception);
             }
         }
+
+        private async Task<List<Guid>> GetRelatedUserId(Guid? userId)
+        {
+            var friendIds = _context.Friendships
+                                            .Where(f => f.RequesterId == userId || f.AddresseeId == userId)
+                                            .Select(f => f.RequesterId == userId ? f.AddresseeId : f.RequesterId);
+
+            var roomateIds = _context.RoomMembers
+                                    .Where(rm => rm.UserId == userId)
+                                    .SelectMany(rm => rm.Room.RoomMembers)
+                                    .Where(rmm => rmm.UserId != userId)
+                                    .Select(rmm => rmm.UserId);
+
+            var allContacts = await friendIds.Union(roomateIds).Distinct().ToListAsync();
+
+            return allContacts;
+        }
+
     }
 }
