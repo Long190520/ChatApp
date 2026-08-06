@@ -1,4 +1,5 @@
 ﻿using ChatApp.Api.Data;
+using ChatApp.Api.Dto;
 using ChatApp.Api.Extensions;
 using ChatApp.Api.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -8,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ChatApp.Api.Hubs
 {
     [Authorize]
-    public class ChatHub : Hub
+    public sealed class ChatHub : Hub
     {
         private readonly ILogger<ChatHub> _logger;
         private readonly ChatAppDbContext _context;
@@ -193,5 +194,31 @@ namespace ChatApp.Api.Hubs
             return allContacts;
         }
 
+        public async Task SendMessage(SendMessageRequestDto request)
+        {
+            var userId = Context.GetUserId();
+
+            // Kiểm tra an toàn trước khi Parse Guid để tránh văng Exception không đáng có
+            if (userId == null)
+            {
+                // Trả lỗi định dạng rõ ràng về client
+                await Clients.Caller.SendAsync("OnConnectionError", "Thông tin định danh người dùng không hợp lệ hoặc thiếu.");
+                Context.Abort(); // Ngắt kết nối ngay lập tức
+                return;
+            }
+
+            await EnsureMembership(userId.Value, request.RoomId);
+
+        }
+
+        private async Task EnsureMembership(Guid userId, Guid roomId)
+        {
+            var isMember = await _context.RoomMembers
+                .AnyAsync(rm => rm.RoomId == roomId && rm.UserId == userId);
+            if (!isMember)
+            {
+                throw new HubException("Người dùng không phải là thành viên của phòng chat này.");
+            }
+        }
     }
 }

@@ -1,7 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-
-namespace ChatApp.Api.Models;
+﻿namespace ChatApp.Api.Models;
 
 public partial class UserConnection
 {
